@@ -1,11 +1,28 @@
 package main
 
-import "github.com/shinyleefeon/rss_gator/internal/config"
+import (
+ "github.com/shinyleefeon/gator_rss/internal/config"
+ "fmt"
+)
 
 func main() {
-	readConfig, err := config.Read()
+	
+	cfg, err := config.Read()
 	if err != nil {
 		panic(err)
 	}
-	// This is a placeholder for the main function.
+
+	cfg.Current_user_name = "Ri"
+	err = config.Write(*cfg)
+	if err != nil {
+		panic(err)
+	}
+
+	cfg, err = config.Read()
+	if err != nil {
+		panic(err)
+	}
+	
+	fmt.Printf("Config file: %+v\n", cfg)
+
 }
