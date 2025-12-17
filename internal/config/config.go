@@ -62,9 +62,9 @@ func Write(cfg Config) error {
 	return nil
 }
 
-func (c Config) SetUser(userName string) {
+func (c *Config) SetUser(userName string) error{
 	c.Current_user_name = userName
-	Write(c)
+	return Write(*c)
 }
 
 	
