@@ -82,6 +82,32 @@ func registerUser(s *state, cmd command) error {
 	return nil
 }
 
+func deleteUsers(s *state, cmd command) error {
+	err := s.db.DeleteUsers(context.Background())
+	if err != nil {
+		fmt.Println("Error deleting users:", err)
+		os.Exit(1)
+	}
+	fmt.Println("All users deleted from the database.")
+	return nil
+}
+
+func getAllUsers(s *state, cmd command) error {
+	users, err := s.db.GetAllUsers(context.Background())
+	if err != nil {
+		return err
+	}
+	fmt.Println("Registered users:")
+	for _, user := range users {
+		if user == s.config.Current_user_name {
+			fmt.Println("* ", user, "(current)")
+		} else {
+			fmt.Println("* ", user)
+		}
+	}
+	return nil
+}
+
 func (c commands) run(s *state, cmd command) error {
 	if handler, exists := c.command_map[cmd.name]; exists {
 		return handler(s, cmd)
@@ -114,6 +140,8 @@ func main() {
 	InitCommands := commands{command_map: make(map[string]func(*state, command) error)}
 	InitCommands.register("login", handlerLogin)
 	InitCommands.register("register", registerUser)
+	InitCommands.register("reset", deleteUsers)
+	InitCommands.register("users", getAllUsers)
 
 	input := os.Args
 	if len(input) < 2 {
