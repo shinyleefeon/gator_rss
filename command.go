@@ -145,29 +145,50 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	return &feed, nil
 }
 
-func aggregateFeeds(s *state, cmd command) error {
-	feed, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+func scrapeFeeds(s *state) error {
+	nextFeed, err := s.db.GetNextFeedToFetch(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get next feed to fetch: %v", err)
+	}
+	s.db.MarkFeedFetched(context.Background(), nextFeed.Name)
+	feed, err := fetchFeed(context.Background(), nextFeed.Url)
 	if err != nil {
 		return fmt.Errorf("failed to fetch feed: %v", err)
 	}
-	fmt.Printf("%+v\n", feed)
+	for _, item := range feed.Channel.Item {
+		fmt.Println(item.Title)
+	}
 	return nil
 }
 
-func addFeed(s *state, cmd command) error {
-	username := s.config.Current_user_name
-	if username == "" {
-		return errors.New("No user logged in. Please login first.")
+func aggregateFeeds(s *state, cmd command) error {
+	if len(cmd.args) < 1 {
+		return errors.New("Time interval between requests is required")
 	}
+	time_between_reqs := cmd.args[0]
+	fmt.Println("Collecting feeds every %s", time_between_reqs)
+	duration, err := time.ParseDuration(time_between_reqs)
+	if err != nil {
+		return err
+	}
+	ticker := time.NewTicker(duration)
+	defer ticker.Stop()
+	for ; ; <-ticker.C {
+		err := scrapeFeeds(s)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func addFeed(s *state, cmd command, user database.User) error {
+	
 	if len(cmd.args) < 2 {
 		return errors.New("Feed name and URL are required")
 	}
 	feedName := cmd.args[0]
 	feedURL := cmd.args[1]
-	user, err:= s.db.GetUser(context.Background(), username)
-	if err != nil {
-		return fmt.Errorf("User %s does not exist", username)
-	}
 	fmt.Printf("Adding feed: %s (%s)\n", feedName, feedURL, user.ID)
 
 	feedParams := database.CreateFeedParams{
@@ -176,12 +197,12 @@ func addFeed(s *state, cmd command) error {
 		UserID: user.ID,
 	}
 	
-	_, err = s.db.CreateFeed(context.Background(), feedParams)
+	_, err := s.db.CreateFeed(context.Background(), feedParams)
 	if err != nil {
 		return err
 	}
 
-	err = followFeed(s, command{args: []string{feedURL}})
+	err = followFeed(s, command{args: []string{feedURL}}, user)
 	if err != nil {
 		return err
 	}
@@ -206,12 +227,8 @@ func listFeeds(s *state, cmd command) error {
 	return nil
 }
 
-func followFeed(s *state, cmd command) error {
-	user, err := s.db.GetUser(context.Background(), s.config.Current_user_name)
-	userid := user.ID
-	if userid == uuid.Nil {
-		return errors.New("No user logged in. Please login first.")
-	}
+func followFeed(s *state, cmd command, user database.User) error {
+	
 	if len(cmd.args) < 1 {
 		return errors.New("Feed url is required to follow")
 	}
@@ -223,7 +240,7 @@ func followFeed(s *state, cmd command) error {
 	follow := database.CreateFeedFollowParams{
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
-		UserID:    userid,
+		UserID:    user.ID,
 		FeedID:    feed.Name,
 	}
 
@@ -239,22 +256,53 @@ func followFeed(s *state, cmd command) error {
 	return nil
 }
 
-func listFollowing(s *state, cmd command) error {
-	username := s.config.Current_user_name
-	if username == "" {
-		return errors.New("No user logged in. Please login first.")
-	}
-	user, err := s.db.GetUser(context.Background(), username)
-	if err != nil {
-		return fmt.Errorf("User %s does not exist", username)
-	}
+func listFollowing(s *state, cmd command, user database.User) error {
+	
 	followedFeeds,  err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Feeds followed by %s:\n", username)
+	fmt.Printf("Feeds followed by %s:\n", user.Name)
 	for _, feedFollow := range followedFeeds {
 		fmt.Printf("* %s (%s)\n", feedFollow.FeedName, feedFollow.FeedID)
 	}
+	return nil
+}
+
+func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(s *state, cmd command) error {
+	return func(s *state, cmd command) error {
+		username := s.config.Current_user_name
+		if username == "" {
+			return errors.New("No user logged in. Please login first.")
+		}
+		user, err := s.db.GetUser(context.Background(), username)
+		if err != nil {
+			return fmt.Errorf("User %s does not exist", username)
+		}
+		return handler(s, cmd, user)
+	}
+}
+
+func unfollowFeed(s *state, cmd command, user database.User) error {
+	
+	if len(cmd.args) < 1 {
+		return errors.New("Feed url is required to unfollow")
+	}
+	feedUrl := cmd.args[0]
+	feed, err := s.db.GetFeedByUrl(context.Background(), feedUrl)
+	if err != nil {
+		return fmt.Errorf("Feed with URL %s does not exist", feedUrl)
+	}
+
+	unfollowParams := database.UnfollowFeedParams{
+		UserID: user.ID,
+		FeedID: feed.Name,
+	}
+
+	err = s.db.UnfollowFeed(context.Background(), unfollowParams)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Successfully unfollowed feed: %s as user %s\n", feedUrl, s.config.Current_user_name)
 	return nil
 }

@@ -60,10 +60,11 @@ func main() {
 	InitCommands.register("reset", deleteUsers)
 	InitCommands.register("users", getAllUsers)
 	InitCommands.register("agg", aggregateFeeds)
-	InitCommands.register("addfeed", addFeed)
+	InitCommands.register("addfeed", middlewareLoggedIn(addFeed))
 	InitCommands.register("feeds", listFeeds)
-	InitCommands.register("follow", followFeed)
-	InitCommands.register("following", listFollowing)
+	InitCommands.register("follow", middlewareLoggedIn(followFeed))
+	InitCommands.register("following", middlewareLoggedIn(listFollowing))
+	InitCommands.register("unfollow", middlewareLoggedIn(unfollowFeed))
 
 	input := os.Args
 	if len(input) < 2 {
