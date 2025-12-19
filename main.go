@@ -59,6 +59,11 @@ func main() {
 	InitCommands.register("register", registerUser)
 	InitCommands.register("reset", deleteUsers)
 	InitCommands.register("users", getAllUsers)
+	InitCommands.register("agg", aggregateFeeds)
+	InitCommands.register("addfeed", addFeed)
+	InitCommands.register("feeds", listFeeds)
+	InitCommands.register("follow", followFeed)
+	InitCommands.register("following", listFollowing)
 
 	input := os.Args
 	if len(input) < 2 {
