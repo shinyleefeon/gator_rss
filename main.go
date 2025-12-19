@@ -65,6 +65,7 @@ func main() {
 	InitCommands.register("follow", middlewareLoggedIn(followFeed))
 	InitCommands.register("following", middlewareLoggedIn(listFollowing))
 	InitCommands.register("unfollow", middlewareLoggedIn(unfollowFeed))
+	InitCommands.register("browse", middlewareLoggedIn(browsePosts))
 
 	input := os.Args
 	if len(input) < 2 {

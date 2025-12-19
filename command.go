@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -11,10 +12,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/shinyleefeon/gator_rss/internal/database"
 )
 
@@ -150,15 +153,78 @@ func scrapeFeeds(s *state) error {
 	if err != nil {
 		return fmt.Errorf("failed to get next feed to fetch: %v", err)
 	}
+	fmt.Printf("Fetching feed: %s (%s)\n", nextFeed.Name, nextFeed.Url)
 	s.db.MarkFeedFetched(context.Background(), nextFeed.Name)
 	feed, err := fetchFeed(context.Background(), nextFeed.Url)
 	if err != nil {
 		return fmt.Errorf("failed to fetch feed: %v", err)
 	}
+	fmt.Printf("Found %d items in feed\n", len(feed.Channel.Item))
+	
+	insertedCount := 0
+	duplicateCount := 0
+	
 	for _, item := range feed.Channel.Item {
-		fmt.Println(item.Title)
+		
+		PubTime := ParseRSSDateToNullTime(item.PubDate)
+		
+		_, err :=s.db.CreatePost(context.Background(), database.CreatePostParams{
+			CreatedAt:   time.Now(),
+			Title: 	 	 item.Title,	
+			Url:         item.Link,
+			Description: sql.NullString{String: item.Description, Valid: item.Description != ""},
+			PublishedAt: PubTime,
+			FeedID:      nextFeed.Name,
+		})
+		if err !=nil {
+			var pqErr *pq.Error
+			if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+				duplicateCount++
+				if duplicateCount <= 3 {
+					fmt.Printf("  Duplicate URL: %s\n", item.Link)
+				}
+				continue
+			}
+			return fmt.Errorf("failed to create post: %v", err)
+		}
+		insertedCount++
+		if insertedCount <= 3 {
+			fmt.Printf("  Inserted: %s (%s)\n", item.Title, item.Link)
+		}
 	}
+	fmt.Printf("Successfully inserted %d posts, skipped %d duplicates\n", insertedCount, duplicateCount)
 	return nil
+}
+
+func ParseRSSDateToNullTime(dateStr string) sql.NullTime {
+	// Clean the input to prevent parsing failures due to extra whitespace
+	dateStr = strings.TrimSpace(dateStr)
+	
+	if dateStr == "" {
+		return sql.NullTime{Valid: false}
+	}
+
+	layouts := []string{
+		time.RFC1123Z,
+		time.RFC1123,
+		time.RFC822Z,
+		time.RFC822,
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05",
+	}
+
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, dateStr); err == nil {
+			return sql.NullTime{
+				Time:  t,
+				Valid: true,
+			}
+		}
+	}
+
+	// Return invalid if no layouts match
+	return sql.NullTime{Valid: false}
 }
 
 func aggregateFeeds(s *state, cmd command) error {
@@ -304,5 +370,26 @@ func unfollowFeed(s *state, cmd command, user database.User) error {
 		return err
 	}
 	fmt.Printf("Successfully unfollowed feed: %s as user %s\n", feedUrl, s.config.Current_user_name)
+	return nil
+}
+func browsePosts(s *state, cmd command, user database.User) error {
+	limit := 2
+	if len(cmd.args) >= 1 {
+		parsedLimit, err := strconv.Atoi(cmd.args[0])
+		if err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+	posts, err := s.db.GetPostsByUser(context.Background(), database.GetPostsByUserParams{
+		UserID: user.ID,
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Latest %d posts for user %s:\n", limit, user.Name)
+	for _, post := range posts {
+		fmt.Printf("* %s (%s) - Published at: %v\n", post.Title, post.Url, post.PublishedAt)
+	}
 	return nil
 }
